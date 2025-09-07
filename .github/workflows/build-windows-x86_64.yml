@@ -88,19 +88,14 @@ jobs:
       - if: inputs.enable-zts == true
         run: echo "SPC_ENABLE_ZTS=--enable-zts" >> $env:GITHUB_ENV
 
-      - run: ./bin/spc doctor
+      - run: ./bin/spc doctor --auto-fix --debug
 
       # Download sources if not cached
       - if: steps.cache-download.outputs.cache-hit != 'true'
         run: ./bin/spc download --with-php="${{ inputs.version }}" --for-extensions="${{ inputs.extensions }}" ${{ env.SPC_BUILD_DEBUG }} ${{ env.SPC_PRE_BUILT }}
 
       # Run build command
-      - run: ./bin/spc build "${{ inputs.extensions }}" \
-          --with-libs="${{ inputs.libraries }}" \
-          ${{ env.SPC_BUILD_DEBUG }} \
-          ${{ env.SPC_BUILD_CLI }} \
-          ${{ env.SPC_BUILD_MICRO }} \
-          ${{ env.SPC_ENABLE_ZTS }}
+      - run: ./bin/spc build ${{ env.SPC_BUILD_DEBUG }} ${{ env.SPC_BUILD_CLI }} ${{ env.SPC_BUILD_MICRO }} ${{ env.SPC_ENABLE_ZTS }} --with-libs="${{ inputs.libraries }}" -- "${{ inputs.extensions }}"
 
       # Upload CLI executable
       - if: ${{ inputs.build-cli == true }}
