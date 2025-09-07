@@ -24,6 +24,12 @@ on:
       extensions:
         description: extensions to compile (comma separated)
         required: true
+        default: "amqp,apcu,ast,bcmath,brotli,bz2,calendar,ctype,curl,dba,dio,dom,ds,ev,exif,ffi,fileinfo,filter,ftp,gd,gmssl,iconv,igbinary,intl,libxml,mbregex,mbstring,msgpack,mysqli,mysqlnd,odbc,opcache,openssl,opentelemetry,parallel,pdo,pdo_mysql,pdo_odbc,pdo_pgsql,pdo_sqlite,pdo_sqlsrv,pgsql,phar,rar,redis,session,shmop,simdjson,simplexml,soap,sockets,sodium,sqlite3,sqlsrv,ssh2,swow,sysvshm,tokenizer,xlswriter,xml,xmlreader,xmlwriter,xz,yac,yaml,zip,zlib"
+        type: string
+      libraries:
+        description: libraries to include (comma separated)
+        required: false
+        default: "freetype,libwebp,libavif,zstd,libjpeg,qdbm"
         type: string
       prefer-pre-built:
         description: prefer pre-built binaries (reduce build time)
@@ -32,6 +38,10 @@ on:
       debug:
         description: enable debug logs
         type: boolean
+      enable-zts:
+        description: enable ZTS build
+        type: boolean
+        default: true
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,52 +60,56 @@ jobs:
           path: vendor
           key: composer-dependencies
 
-      # If there's no Composer cache, install dependencies
       - if: steps.cache-composer-deps.outputs.cache-hit != 'true'
         run: composer update --no-dev --classmap-authoritative
 
-      - name: Generate hashed key for download cache
-        shell: bash
+      # Generate hashed key for download cache
+      - shell: bash
         run: |
-          INPUT_HASH=$(echo "${{ runner.os }}-${{ inputs.version }}-${{ inputs.extensions }}" | sha256sum | awk '{print $1}')
+          INPUT_HASH=$(echo "${{ runner.os }}-${{ inputs.version }}-${{ inputs.extensions }}-${{ inputs.libraries }}" | sha256sum | awk '{print $1}')
           echo "INPUT_HASH=${INPUT_HASH}" >> "$GITHUB_ENV"
 
-      # Cache downloaded source
+      # Cache downloaded sources
       - id: cache-download
         uses: actions/cache@v4
         with:
           path: downloads
           key: php-${{ env.INPUT_HASH }}
 
-      # With or without debug
+      # Set environment variables for build flags
       - if: inputs.debug == true
         run: echo "SPC_BUILD_DEBUG=--debug" >> $env:GITHUB_ENV
       - if: inputs.prefer-pre-built == true
         run: echo "SPC_PRE_BUILT=--prefer-pre-built" >> $env:GITHUB_ENV
-
-      # With target select: cli, micro or both
-      - if: ${{ inputs.build-cli == true }}
+      - if: inputs.build-cli == true
         run: echo "SPC_BUILD_CLI=--build-cli" >> $env:GITHUB_ENV
-      - if: ${{ inputs.build-micro == true }}
+      - if: inputs.build-micro == true
         run: echo "SPC_BUILD_MICRO=--build-micro" >> $env:GITHUB_ENV
+      - if: inputs.enable-zts == true
+        run: echo "SPC_ENABLE_ZTS=--enable-zts" >> $env:GITHUB_ENV
 
       - run: ./bin/spc doctor
 
-      # If there's no dependencies cache, fetch sources, with or without debug
+      # Download sources if not cached
       - if: steps.cache-download.outputs.cache-hit != 'true'
         run: ./bin/spc download --with-php="${{ inputs.version }}" --for-extensions="${{ inputs.extensions }}" ${{ env.SPC_BUILD_DEBUG }} ${{ env.SPC_PRE_BUILT }}
 
       # Run build command
-      - run: ./bin/spc build "${{ inputs.extensions }}" ${{ env.SPC_BUILD_DEBUG }} ${{ env.SPC_BUILD_CLI }} ${{ env.SPC_BUILD_MICRO }} ${{ env.SPC_BUILD_FPM }}
+      - run: ./bin/spc build "${{ inputs.extensions }}" \
+          --with-libs="${{ inputs.libraries }}" \
+          ${{ env.SPC_BUILD_DEBUG }} \
+          ${{ env.SPC_BUILD_CLI }} \
+          ${{ env.SPC_BUILD_MICRO }} \
+          ${{ env.SPC_ENABLE_ZTS }}
 
-      # Upload cli executable
+      # Upload CLI executable
       - if: ${{ inputs.build-cli == true }}
         uses: actions/upload-artifact@v4
         with:
           name: php-${{ inputs.version }}
           path: buildroot/bin/php.exe
 
-      # Upload micro self-extracted executable
+      # Upload micro executable
       - if: ${{ inputs.build-micro == true }}
         uses: actions/upload-artifact@v4
         with:
